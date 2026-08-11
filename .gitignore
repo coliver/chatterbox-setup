@@ -1,0 +1,23 @@
+# Virtualenvs (huge, machine-specific — never commit)
+venv/
+venv-chatterbox/
+
+# Python bytecode
+__pycache__/
+*.pyc
+
+# Server logs (reboot.sh writes here) + any stray root logs
+logs/
+*.log
+
+# Generated / streamed audio and scratch clips
+scratch/
+
+# Voice and chime assets — keep the folders, not the contents
+voices/*
+chimes/*
+!voices/.gitkeep
+!chimes/.gitkeep
+
+# Local Claude Code tooling config (may contain machine-specific paths)
+.claude/

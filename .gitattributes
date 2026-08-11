@@ -1,0 +1,11 @@
+# Normalize all text to LF in the repo and on checkout. Critical for the shell
+# scripts: a CRLF shebang (#!/bin/bash\r) breaks them in Git Bash on Windows.
+* text=auto eol=lf
+
+# Audio assets are binary (also gitignored, but be explicit).
+*.wav binary
+*.mp3 binary
+*.ogg binary
+*.flac binary
+*.m4a binary
+*.opus binary

@@ -1,0 +1,17 @@
+# Lint policy for this repo. Run: venv/Scripts/python -m ruff check .
+# Rule set = ruff's default meaningful errors (pyflakes + pycodestyle logic/
+# syntax) plus import sorting. We deliberately do NOT enable opinionated rules
+# like BLE001 ("no broad except"): the servers catch `Exception` on purpose so a
+# single bad request or a warmup hiccup becomes a 500/logged line instead of
+# taking the process down.
+extend-exclude = ["venv", "venv-chatterbox"]
+
+[lint]
+select = ["E4", "E7", "E9", "F", "I"]
+
+[lint.per-file-ignores]
+# The servers import the heavy ML libs (torch / f5_tts / chatterbox) lazily --
+# after a "loading model..." print and inside the load-timing block -- on
+# purpose, so E402 (module import not at top of file) is expected there.
+"server.py" = ["E402"]
+"chatterbox_server.py" = ["E402"]
