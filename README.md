@@ -1,22 +1,23 @@
-# Warm TTS servers
+# Warm TTS
 
-Two always-warm local text-to-speech servers plus low-latency driver scripts.
-Each server loads its model once and synthesizes on demand, so requests avoid
-cold-start latency.
+Always-warm local text-to-speech with a low-latency bash client. The server
+loads its model once and synthesizes on demand, so requests avoid cold-start
+latency.
 
-- **F5-TTS** — `server.py`, port `8765`. Needs a reference transcript per voice.
-- **Chatterbox** — `chatterbox_server.py`, port `8766`. Clones from bare audio
-  (no transcript) and adds an `exaggeration` emotion knob. Generally higher
-  quality; F5 is faster / lighter.
+- **Chatterbox** — `chatterbox_server.py`, port `8766`. **The primary engine** —
+  the default everywhere, and the one you'll normally run. Clones from bare audio
+  (no transcript needed) and adds an `exaggeration` emotion knob. Best quality.
+- **F5-TTS** — `server.py`, port `8765`. *Optional / secondary.* Faster and
+  lighter, but needs a reference transcript per voice; kept for latency- or
+  VRAM-constrained cases. It can also proxy `?engine=chatterbox` to :8766.
 
-The F5 server can proxy Chatterbox requests (`?engine=chatterbox`), so you can
-hit a single port if you like, but the drivers talk to each engine directly.
+In practice you usually just run Chatterbox; F5 is there if you want it.
 
 ## Layout
 
 ```
-server.py               F5-TTS server (:8765)
-chatterbox_server.py    Chatterbox server (:8766, separate venv)
+chatterbox_server.py    Chatterbox server (:8766) — the primary engine
+server.py               F5-TTS server (:8765) — optional second engine
 voicelib.py             shared voice/chime discovery (filesystem = registry)
 httputil.py             shared query-param parsing helpers
 qsay.sh                 streaming "say": split text, synthesize + play per sentence
@@ -32,9 +33,10 @@ chimes/                 drop chimes here (contents are gitignored)
 
 ## Prerequisites
 
-- Python 3.12, with **two** virtualenvs (the engines have conflicting pins):
-  - `venv/` — install `f5-tts`.
-  - `venv-chatterbox/` — install `chatterbox-tts` (pins `numpy<2`, etc.).
+- Python 3.12. Chatterbox needs its own virtualenv `venv-chatterbox/`
+  (`chatterbox-tts`, which pins `numpy<2`, etc.). F5 is optional — only if you
+  want the second engine, create a separate `venv/` with `f5-tts` (its pins
+  conflict with Chatterbox's, hence the separate env).
 - [ffmpeg](https://ffmpeg.org/) **and `ffplay`** on `PATH` (ffplay ships with
   ffmpeg; used for audio processing and playback respectively).
 - A CUDA GPU is used automatically if available, else CPU.
@@ -43,15 +45,16 @@ chimes/                 drop chimes here (contents are gitignored)
 
 ## Setup
 
-1. Create the two venvs and install each engine into its own:
+1. Create the Chatterbox venv (F5 is optional):
    ```bash
-   py -3.12 -m venv venv            && venv/Scripts/pip install f5-tts
    py -3.12 -m venv venv-chatterbox && venv-chatterbox/Scripts/pip install chatterbox-tts
+   # optional second engine:
+   py -3.12 -m venv venv            && venv/Scripts/pip install f5-tts
    ```
 2. Add voices — drop an audio file into `voices/`; its filename (without
    extension) becomes the voice name. Recognized: `.wav .flac .mp3 .ogg .m4a .opus`.
-   - For **F5**, also add a `<name>.txt` next to it containing the exact words
-     spoken in that clip (the reference transcript). Chatterbox ignores it.
+   - Only if you use **F5**: also add a `<name>.txt` next to it with the exact
+     words spoken in that clip (the reference transcript). Chatterbox ignores it.
 3. Add chimes (optional) — drop a **PCM `.wav`** into `chimes/`; its name becomes
    a chime. A chime named after a voice is auto-selected for that voice.
 
@@ -60,15 +63,15 @@ Discovery runs per request, so newly dropped files work immediately — no resta
 ## Run
 
 ```bash
-./reboot.sh              # start / restart F5 on :8765, waits for /health
-./reboot.sh chatterbox   # start / restart Chatterbox on :8766
+./reboot.sh chatterbox   # start / restart Chatterbox on :8766 (the one you'll use)
+./reboot.sh              # optional: start / restart F5 on :8765
 ```
 
 ## Use
 
 ```bash
 ./qsay.sh "Right then. Keep the first sentence short."   # chatterbox (default), voice steve
-./qsay.sh "Text to speak" doctor f5                      # f5 engine
+./qsay.sh "Text to speak" doctor f5                      # optional: F5 engine
 CHIME="" ./qsay.sh "Text to speak" steve                 # no chime (CHIME=name forces one)
 DRY_RUN=1 ./qsay.sh "Text to speak"                      # print commands; synthesize/play nothing
 ```
@@ -98,17 +101,17 @@ Malformed numeric params return `400` with a message. Other endpoints:
 ## Tests
 
 ```bash
-venv/Scripts/python -m unittest discover -s tests -t .   # Python, stdlib only
-bash tests/common.test.sh                                # shell helpers
+venv-chatterbox/Scripts/python -m unittest discover -s tests -t .   # Python, stdlib only
+bash tests/common.test.sh                                           # shell helpers
 ```
 
 ## Lint
 
 ```bash
-venv/Scripts/python -m ruff check .                      # Python (policy in ruff.toml)
+venv-chatterbox/Scripts/python -m ruff check .           # Python (policy in ruff.toml)
 bash -n qsay.sh pipe.sh reboot.sh lib/common.sh          # shell syntax check
 # Deeper shell lint (optional): choco install shellcheck && shellcheck *.sh lib/*.sh
 ```
 
-`ruff` is a dev-only tool (install with `venv/Scripts/pip install ruff`); it is
-not a runtime dependency of the servers.
+`ruff` is a dev-only tool (`venv-chatterbox/Scripts/pip install ruff`); it is not
+a runtime dependency of the servers. (Either venv works — the tests are stdlib-only.)
