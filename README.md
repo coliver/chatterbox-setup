@@ -29,20 +29,23 @@ Targets **Linux / WSL2** (the drivers use `lsof` and POSIX paths).
 
 - Python 3.12 with `venv`. Chatterbox needs its own virtualenv `venv-chatterbox/`
   (`chatterbox-tts`, which pins `numpy<2`, etc.).
-- [ffmpeg](https://ffmpeg.org/) on `PATH`, **built with `--enable-libpulse`**
-  (playback goes through `ffmpeg -f pulse`; the stock Ubuntu/Debian build has it):
+- [ffmpeg](https://ffmpeg.org/) on `PATH` (used to synthesize/normalize):
   `sudo apt-get install -y ffmpeg`. `lsof` (used by `reboot.sh` to free the port)
   is usually already present.
+- **WSL2 with Windows interop** for playback: clips play via `powershell.exe`
+  SoundPlayer over the `\\wsl.localhost\...` path (see below).
 - A CUDA GPU is used automatically if available, else CPU. On **WSL2**, CUDA works
   through the Windows driver (`/usr/lib/wsl/lib/libcuda.so`) — no in-WSL driver
   install needed.
-- **Audio playback**: clips play via `ffmpeg -f pulse` (native libpulse). On
-  **WSL2**, WSLg provides PulseAudio automatically (`/mnt/wslg/PulseServer`). We
-  use libpulse directly rather than ffplay/SDL because SDL's resampler crackles
-  over WSLg. Point at a non-default sink with `PULSE_SINK=<name>`.
-  - **If playback fails outright** (the WSLg audio bridge has gone stale — the
-    socket exists but can't be reached), revive it from Windows with
-    `wsl --shutdown`, then reopen WSL.
+- **Audio playback**: clips play through the **Windows** audio stack —
+  `play()` translates the path with `wslpath -w` and hands it to PowerShell's
+  `Media.SoundPlayer`. On this WSLg host every native Linux route (ffplay/SDL,
+  `ffmpeg -f pulse`) was scratchy, while the same wav plays cleanly on Windows.
+  SoundPlayer only handles PCM wav, which is what the server writes.
+  - **If playback fails outright**, make sure Windows interop works
+    (`powershell.exe` runs from WSL) and the clip is reachable at its
+    `\\wsl.localhost\...` path; if the bridge is wedged, `wsl --shutdown` from
+    Windows and reopen.
 
 ## Setup
 

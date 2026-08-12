@@ -25,19 +25,19 @@ run() {
   "$@"
 }
 
-# Play an audio file through PulseAudio via ffmpeg's native libpulse output.
-# Takes a POSIX path, blocks until the clip finishes, honors DRY_RUN via run().
-# We deliberately avoid ffplay here: on WSLg its SDL backend resamples with a
-# low-quality resampler into a small callback buffer, which crackles/underruns
-# ("scratchy"). `ffmpeg -f pulse` hands the audio to libpulse directly and plays
-# cleanly. The trailing arg is the stream name shown in the mixer; the sink is
-# the pulse default (override with the PULSE_SINK env var if needed).
-# The pulse muxer tears the stream down on exit without draining, so whatever is
-# still in its buffer (up to buffer_duration) is dropped -- clipping the last
-# word. We bound that buffer to 200ms and pad 0.35s of trailing silence, so the
-# dropped tail lands in the silence and real speech always makes it out.
+# Play an audio file through the *Windows* audio stack via PowerShell's
+# SoundPlayer. Takes a POSIX path, blocks until the clip finishes (PlaySync),
+# honors DRY_RUN via run().
+# Why not a Linux player: on this WSLg host every native route we tried is
+# scratchy -- ffplay/SDL (bad resampler) and even `ffmpeg -f pulse` at native
+# 48kHz with a full buffer. The identical wav plays cleanly on Windows, so we
+# translate the path with `wslpath -w` and hand it to SoundPlayer, which uses the
+# Windows audio stack directly and needs no resample/buffer/pad tricks.
+# NOTE: SoundPlayer only plays PCM wav (our speech + chimes are PCM s16le).
 play() {
-  run ffmpeg -v error -i "$1" -af "apad=pad_dur=0.35" -f pulse -buffer_duration 200 chatterbox
+  local win
+  win="$(wslpath -w "$1")"
+  run powershell.exe -NoProfile -Command "(New-Object Media.SoundPlayer '$win').PlaySync()"
 }
 
 # Resolve which chime to play. "auto" (the default when no chime was specified)

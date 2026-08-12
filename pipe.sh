@@ -26,13 +26,15 @@ chime="$(resolve_chime "${CHIME:-auto}" "$voice" "$dir/chimes")"
 
 # Remove any leftover clips for this prefix now and on exit (so an interrupt
 # doesn't leave scratch behind); also kill the background synth if still running.
+# KEEP_SCRATCH=1 leaves the generated clips in scratch/ for inspection (skips
+# both the pre-clean and the exit cleanup); the background synth is still reaped.
 synth_pid=""
 cleanup() {
   if [ -n "$synth_pid" ]; then kill "$synth_pid" 2>/dev/null || true; fi
-  rm -f "$scr/${prefix}_"*.wav 2>/dev/null || true
+  [ "${KEEP_SCRATCH:-0}" = "1" ] || rm -f "$scr/${prefix}_"*.wav 2>/dev/null || true
 }
 trap cleanup EXIT
-rm -f "$scr/${prefix}_"*.wav 2>/dev/null || true
+[ "${KEEP_SCRATCH:-0}" = "1" ] || rm -f "$scr/${prefix}_"*.wav 2>/dev/null || true
 
 mapfile -t lines < "$file"
 n=${#lines[@]}
