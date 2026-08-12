@@ -15,13 +15,21 @@ dir="$(cd "$(dirname "$0")" && pwd)"       # this script's folder
 . "$dir/lib/common.sh"
 [ -n "$text" ] || die "usage: qsay.sh \"text\" [voice]"
 
-# One sentence per line: break after . ! ? (keeping the punctuation), trim blanks.
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
-printf '%s' "$text" \
-  | sed -E 's/([.!?]+)[[:space:]]+/\1\n/g' \
-  | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
-  | grep -v '^$' > "$tmp" || true   # grep exits 1 if every line was blank; not an error here
+if [ "${NOSPLIT:-0}" = "1" ]; then
+  # Whole utterance as ONE line -> one clip -> a single synth call. Gapless and
+  # lowest total latency for a full reply: synth has a ~2s/call floor, so N
+  # sentences cost N*2s streamed (with gaps) but only ~one call joined. Collapse
+  # newlines/whitespace so it stays a single line for pipe.sh's mapfile.
+  printf '%s' "$text" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' > "$tmp"
+else
+  # One sentence per line: break after . ! ? (keeping punctuation), trim blanks.
+  printf '%s' "$text" \
+    | sed -E 's/([.!?]+)[[:space:]]+/\1\n/g' \
+    | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
+    | grep -v '^$' > "$tmp" || true   # grep exits 1 if every line blank; fine here
+fi
 
 # Scratch prefix (isolates concurrent runs; override so e.g. a Stop hook speaking
 # in the background can't stomp a manual ./qsay.sh's in-flight clips).
