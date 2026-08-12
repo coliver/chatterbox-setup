@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Stop-hook helper: speak Claude's last assistant message in the ship voice.
+
+Claude Code runs this when the main agent finishes a turn. It receives the hook
+JSON on stdin ({"transcript_path": "...", ...}), pulls the most recent assistant
+*text* from that JSONL transcript, lightly de-markdowns it, and hands it to
+qsay.sh for streaming synthesis+playback.
+
+Playback is launched detached (its own session/process group) so the hook returns
+immediately instead of blocking the UI on synthesis. A lockfile holds the PID of
+the previous utterance's group; a new turn kills it first, so a fresh response
+supersedes an old one still talking instead of overlapping it.
+
+Exits 0 silently on anything unexpected -- a talkback hook must never wedge or
+block the turn.
+"""
+import hashlib
+import json
+import os
+import re
+import signal
+import subprocess
+import sys
+import time
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROJECT = os.path.dirname(HERE)
+QSAY = os.path.join(PROJECT, "qsay.sh")
+VOICE = os.environ.get("SHIP_HOOK_VOICE", "data")  # talkback voice (SPEED 1.2)
+LOCKFILE = os.path.join(HERE, ".speak.pid")
+LASTFILE = os.path.join(HERE, ".speak.last")  # hash of the message last spoken
+
+# The Stop hook fires before the just-finished message is flushed to the
+# transcript JSONL, so a naive read grabs the PREVIOUS message. We snapshot the
+# newest row at start and wait up to POLL_SECONDS for it to change (this turn
+# landing), checking every POLL_INTERVAL.
+POLL_SECONDS = 3.0
+POLL_INTERVAL = 0.15
+
+
+def last_assistant_text(transcript_path):
+    """Return the most recent non-empty assistant text block, or ''."""
+    latest = ""
+    with open(transcript_path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if row.get("type") != "assistant":
+                continue
+            content = row.get("message", {}).get("content")
+            if isinstance(content, list):
+                text = " ".join(
+                    b.get("text", "")
+                    for b in content
+                    if isinstance(b, dict) and b.get("type") == "text"
+                ).strip()
+            elif isinstance(content, str):
+                text = content.strip()
+            else:
+                text = ""
+            if text:
+                latest = text
+    return latest
+
+
+SPEAK_RE = re.compile(r"<!--\s*SPEAK:(.*?)-->", re.S)
+
+
+def spoken_from(raw):
+    """Pick what to read aloud. The real spoken gist is the LAST
+    `<!--SPEAK: ...-->` marker in the reply -- by convention it sits at the very
+    end. Earlier markers are illustrative prose (e.g. a reply that explains the
+    talkback mechanism and quotes the marker syntax), so voicing all of them
+    would recite the reference material instead of the intended line. With no
+    marker, returns empty so the hook stays silent."""
+    parts = SPEAK_RE.findall(raw)
+    return parts[-1].strip() if parts else ""  # last marker only; none -> silent
+
+
+CHIME_RE = re.compile(r"<!--\s*CHIME:\s*([A-Za-z0-9_-]+)\s*-->")
+
+
+def chime_from(raw):
+    """Chime name from a `<!--CHIME: name-->` marker, or '' if none. An unknown
+    or 'none' name just means no chime plays (pipe.sh skips a missing wav), so
+    the assistant picks the chime per reply to match its tone."""
+    m = CHIME_RE.search(raw)
+    return m.group(1) if m else ""
+
+
+def despeakify(text):
+    """Strip markdown/emoji noise so the voice reads prose, not syntax."""
+    text = re.sub(r"```.*?```", " ", text, flags=re.S)      # fenced code blocks
+    text = re.sub(r"`([^`]*)`", r"\1", text)                 # inline code -> content
+    text = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", text)   # links/images -> label
+    text = re.sub(r"https?://\S+", " ", text)                # bare URLs
+    text = re.sub(r"[*_~#>|]", " ", text)                    # emphasis/heading/table marks
+    text = re.sub(r"[^\x00-\x7F]", " ", text)                # drop emoji / non-ASCII
+    text = re.sub(r"\s+", " ", text)                         # collapse whitespace
+    return text.strip()
+
+
+def kill_previous():
+    """Terminate the prior utterance so a new turn supersedes it.
+
+    Two kills are needed: the WSL process group (qsay/pipe.sh), and the
+    Windows SoundPlayer that actually emits audio. The player is launched via
+    interop (powershell.exe ... PlaySync), so it is NOT in the WSL process
+    group -- SIGTERM alone leaves the old clip playing over the new one. We
+    stop only players whose command line references a hook clip (hook_*.wav),
+    so a manual ./qsay.sh (prefix "qsay") is left alone.
+    """
+    try:
+        with open(LOCKFILE) as f:
+            pgid = int(f.read().strip())
+    except (OSError, ValueError):
+        pgid = None
+    if pgid is not None:
+        try:
+            os.killpg(pgid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError, OSError):
+            pass
+    try:
+        subprocess.run(
+            ["powershell.exe", "-NoProfile", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | "
+             "Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'hook_' -and "
+             "$_.CommandLine -match 'PlaySync' } | "
+             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def read_last_hash():
+    try:
+        with open(LASTFILE) as f:
+            return f.read().strip()
+    except OSError:
+        return ""
+
+
+def main():
+    try:
+        payload = json.load(sys.stdin)
+    except (ValueError, OSError):
+        return
+    tpath = payload.get("transcript_path")
+    if not tpath or not os.path.isfile(tpath):
+        return
+
+    prev_hash = read_last_hash()
+
+    def newest():
+        try:
+            return despeakify(spoken_from(last_assistant_text(tpath)))
+        except OSError:
+            return ""
+
+    def h(s):
+        return hashlib.sha1(s.encode()).hexdigest() if s else ""
+
+    # The just-finished message flushes to the transcript ~0.5s AFTER this hook
+    # fires, so at start the newest row is still the PREVIOUS turn. Snapshot it,
+    # then wait for the newest row to CHANGE -- that change is this turn landing.
+    start_text = newest()
+    start_hash = h(start_text)
+    deadline = time.monotonic() + POLL_SECONDS
+    text = ""
+    while time.monotonic() < deadline:
+        cur = newest()
+        if cur and h(cur) != start_hash:
+            text = cur  # this turn's message just flushed
+            break
+        time.sleep(POLL_INTERVAL)
+    if not text:
+        # No new flush observed within the window. Fall back to the snapshot only
+        # if it's genuinely something we haven't spoken (e.g. first run, or the
+        # turn had already flushed before we looked).
+        if start_text and start_hash != prev_hash:
+            text = start_text
+    if not text:
+        return  # nothing new to say
+
+    try:
+        with open(LASTFILE, "w") as f:
+            f.write(hashlib.sha1(text.encode()).hexdigest())
+    except OSError:
+        pass
+
+    # Chime chosen per reply via a <!--CHIME: name--> marker (message has flushed
+    # by now). Empty -> CHIME unset -> pipe.sh's auto -> none (no matching chime).
+    # Default to a short chirp so the voice never starts cold (startling); a
+    # <!--CHIME: name--> marker or SHIP_HOOK_CHIME overrides. CHIME="" via marker
+    # "none" still disables (pipe.sh treats a missing wav as no chime).
+    chime = chime_from(last_assistant_text(tpath)) or os.environ.get("SHIP_HOOK_CHIME", "ship-combadge")
+
+    kill_previous()
+    # Distinct scratch prefix so background hook speech never stomps a manual
+    # ./qsay.sh (which defaults to the "qsay" prefix).
+    env = dict(
+        os.environ,
+        QSAY_PREFIX="hook",
+        TEMP="0.4",    # turbo honors only temperature
+        SPEED="1.2",   # 20% faster delivery (atempo) -- user preference
+        # Sentence-streaming (qsay default): short first sentence -> fast first
+        # word. Turbo synthesizes faster than realtime, so streaming stays
+        # gapless too.
+    )
+    if chime:
+        env["CHIME"] = chime
+    log = open(os.path.join(HERE, "speak.log"), "w")  # noqa: SIM115 (lives with child)
+    log.write(f"==== {time.strftime('%H:%M:%S')} launching: {text[:60]!r} chime={chime or '-'}\n")
+    log.flush()
+    proc = subprocess.Popen(
+        ["bash", QSAY, text, VOICE],
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=log,
+        start_new_session=True,  # own process group -> killable as a unit
+        cwd=PROJECT,
+        env=env,
+    )
+    try:
+        with open(LOCKFILE, "w") as f:
+            f.write(str(proc.pid))  # pgid == pid for a session leader
+    except OSError:
+        pass
+
+
+if __name__ == "__main__":
+    main()
