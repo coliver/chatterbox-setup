@@ -23,4 +23,6 @@ printf '%s' "$text" \
   | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
   | grep -v '^$' > "$tmp" || true   # grep exits 1 if every line was blank; not an error here
 
-"$dir/pipe.sh" qsay "$tmp" "$voice"
+# Scratch prefix (isolates concurrent runs; override so e.g. a Stop hook speaking
+# in the background can't stomp a manual ./qsay.sh's in-flight clips).
+"$dir/pipe.sh" "${QSAY_PREFIX:-qsay}" "$tmp" "$voice"
