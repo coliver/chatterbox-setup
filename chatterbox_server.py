@@ -1,18 +1,21 @@
-"""Warm Chatterbox-TTS server: loads the model once, synthesizes on demand.
+"""Warm Chatterbox-TTS *turbo* server: loads the model once, synthesizes on demand.
 
 Runs in the isolated `venv-chatterbox` (chatterbox-tts pins numpy<2 etc.). The
 bash client (qsay.sh -> pipe.sh) POSTs straight to this port.
 
+Uses the distilled turbo model (ChatterboxTurboTTS): a 2-step meanflow decoder
+and no CFG, so synthesis runs faster than realtime (~2x the standard model).
+Trade-offs vs the standard model:
+  * `exaggeration` and `cfg` are IGNORED by turbo (only `temperature` applies) --
+    the query params are still accepted but have no effect.
+  * the reference clip must be > 5s, so voices with a shorter clip (steve, tom,
+    q, q2) don't work here; use ship/doctor/jarvis/etc.
+
 POST /say     body = text to speak (raw UTF-8)
-              optional query: ?voice=steve&exaggeration=0.5&cfg=0.5
-                              &temperature=0.8&out=/path/to/reply.wav
+              optional query: ?voice=ship&temperature=0.8&out=/path/to/reply.wav
 GET  /health  -> "ok" once the model is loaded
 GET  /voices  -> newline-separated discovered voice names
 GET  /chimes  -> newline-separated discovered chime names
-
-Chatterbox clones from a bare reference wav (no transcript needed) and adds an
-`exaggeration` emotion knob (0..1+, 0.5 neutral). cfg_weight ~0.3 keeps pacing
-sane when exaggeration is pushed high.
 """
 
 import os
@@ -41,18 +44,19 @@ import voicelib
 BASE = voicelib.BASE
 SCRATCH = os.path.join(BASE, "scratch")
 os.makedirs(SCRATCH, exist_ok=True)
-DEFAULT_VOICE = "steve"
+# Default voice must have a >5s reference clip (turbo requirement); ship is 7s.
+DEFAULT_VOICE = "ship"
 DEFAULT_OUT = os.path.join(SCRATCH, "reply.wav")
 
-print("[cbx] loading Chatterbox model...", flush=True)
+print("[cbx] loading Chatterbox turbo model...", flush=True)
 _t = time.time()
 import numpy as np
 import soundfile as sf
 import torch
-from chatterbox.tts import ChatterboxTTS
+from chatterbox.tts_turbo import ChatterboxTurboTTS  # not exported at package top level
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-TTS = ChatterboxTTS.from_pretrained(device=DEVICE)
+TTS = ChatterboxTurboTTS.from_pretrained(device=DEVICE)
 SR = TTS.sr
 # One shared model instance -> serialize inference. The HTTP layer stays threaded
 # (connections queue), but only one /say synthesizes at a time, so overlapping
@@ -61,15 +65,14 @@ INFER_LOCK = threading.Lock()
 print(f"[cbx] model loaded in {time.time()-_t:.1f}s on {DEVICE}", flush=True)
 
 
-def synth(text, ref, exaggeration, cfg_weight, temperature, out):
+def synth(text, ref, temperature, out):
     """Synthesize `text` cloning reference audio `ref` to `out` as a 16-bit PCM
-    wav (broadly compatible with players/editors; torchaudio would write float)."""
+    wav (broadly compatible with players/editors; torchaudio would write float).
+    Turbo ignores exaggeration/cfg, so only temperature is passed through."""
     with INFER_LOCK:
         wav = TTS.generate(
             text,
             audio_prompt_path=ref,
-            exaggeration=exaggeration,
-            cfg_weight=cfg_weight,
             temperature=temperature,
         )
     # wav is a torch tensor shaped (1, N) on the model device.
@@ -84,7 +87,7 @@ def synth(text, ref, exaggeration, cfg_weight, temperature, out):
 
 # Warm up so the first real request is fast too.
 try:
-    synth("System online.", voicelib.voices()[DEFAULT_VOICE], 0.5, 0.5, 0.8, DEFAULT_OUT)
+    synth("System online.", voicelib.voices()[DEFAULT_VOICE], 0.8, DEFAULT_OUT)
     print("[cbx] warmup complete", flush=True)
 except Exception as e:  # pragma: no cover
     print(f"[cbx] warmup failed: {e}", flush=True)
@@ -116,8 +119,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, f"unknown voice: {voice}")
             return
         try:
-            exaggeration = httputil.float_param(q, "exaggeration", 0.5)
-            cfg_weight = httputil.float_param(q, "cfg", 0.5)
+            # exaggeration/cfg are accepted for client compatibility but turbo
+            # ignores them; only temperature is honored.
             temperature = httputil.float_param(q, "temperature", 0.8)
         except ValueError as e:
             self._send(400, str(e))
@@ -130,7 +133,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         t0 = time.time()
         try:
-            synth(text, voices[voice], exaggeration, cfg_weight, temperature, out)
+            synth(text, voices[voice], temperature, out)
         except Exception as e:
             self._send(500, f"error: {e}")
             return

@@ -1,10 +1,15 @@
 # Warm TTS
 
 Always-warm local text-to-speech with a low-latency bash client. The
-**Chatterbox** server (`chatterbox_server.py`, port `8766`) loads its model once
-and synthesizes on demand, so requests avoid cold-start latency. It clones from
-bare reference audio (no transcript needed) and exposes an `exaggeration` emotion
-knob.
+**Chatterbox turbo** server (`chatterbox_server.py`, port `8766`) loads its model
+once and synthesizes on demand, so requests avoid cold-start latency. It clones
+from bare reference audio (no transcript needed).
+
+Uses the distilled **turbo** model (`ChatterboxTurboTTS`): a 2-step decoder and
+no CFG, so synthesis runs faster than realtime. Two consequences: `exaggeration`
+and `cfg` are ignored (only `temperature` applies), and each voice's reference
+clip must be **> 5 s** (shorter clips are rejected by turbo). Adjust speaking
+rate client-side with `SPEED` (ffmpeg atempo).
 
 ## Layout
 
@@ -53,8 +58,11 @@ Targets **Linux / WSL2** (the drivers use `lsof` and POSIX paths).
    ```bash
    python3 -m venv venv-chatterbox && venv-chatterbox/bin/pip install -U pip chatterbox-tts
    ```
+   The turbo weights (~4 GB, `ResembleAI/chatterbox-turbo`) download automatically
+   on first server start; they cache under `~/.cache/huggingface`.
 2. Add voices — drop an audio file into `voices/`; its filename (without
    extension) becomes the voice name. Recognized: `.wav .flac .mp3 .ogg .m4a .opus`.
+   The reference clip must be **> 5 s** (turbo requirement).
 3. Add chimes (optional) — drop a **PCM `.wav`** into `chimes/`; its name becomes
    a chime. A chime named after a voice is auto-selected for that voice.
 
@@ -69,13 +77,14 @@ Discovery runs per request, so newly dropped files work immediately — no resta
 ## Use
 
 ```bash
-./qsay.sh "Right then. Keep the first sentence short."   # voice steve (default)
+./qsay.sh "Right then. Keep the first sentence short."   # voice ship (default)
 ./qsay.sh "Text to speak" doctor                         # a different voice
-CHIME="" ./qsay.sh "Text to speak" steve                 # no chime (CHIME=name forces one)
+CHIME="" ./qsay.sh "Text to speak" ship                  # no chime (CHIME=name forces one)
+SPEED=1.2 ./qsay.sh "Text to speak"                      # 20% faster delivery
 DRY_RUN=1 ./qsay.sh "Text to speak"                      # print commands; synthesize/play nothing
 ```
 
-Knobs via env vars (see `pipe.sh`): `EXAG` (exaggeration), `CFG` (cfg_weight).
+Knobs via env vars (see `pipe.sh`): `TEMP` (temperature), `SPEED` (atempo rate).
 With no `CHIME` set, a chime named after the voice is used, else `weird`, else none.
 
 ## HTTP API
@@ -84,12 +93,11 @@ With no `CHIME` set, a chime named after the voice is used, else `weird`, else n
 
 | Param          | Default            | Notes                                  |
 |----------------|--------------------|----------------------------------------|
-| `voice`        | `steve`            | must exist in `voices/`                |
+| `voice`        | `ship`             | must exist in `voices/`, reference > 5 s |
 | `out`          | `scratch/reply.wav`| output wav path                        |
-| `exaggeration` | `0.5`              | intensity, 0..1+                       |
-| `cfg`          | `0.5`              | lower (~0.3) steadies pacing when hot  |
 | `temperature`  | `0.8`              | number                                 |
 
+`exaggeration`/`cfg` are accepted (client compatibility) but ignored by turbo.
 Malformed numeric params return `400` with a message. Other endpoints:
 `GET /health` → `ok`, `GET /voices`, `GET /chimes`.
 

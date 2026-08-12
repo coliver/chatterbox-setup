@@ -1,8 +1,9 @@
 #!/bin/bash
 # Usage: pipe.sh <prefix> <textfile> [voice]   (one sentence per line)
-#   voice:  server voice key (e.g. "steve"); empty = the server's default voice.
+#   voice:  server voice key (e.g. "ship"); empty = the server's default voice.
 # Knobs via env vars:
-#   EXAG (0.5), CFG (0.5), TEMP (0.8): Chatterbox exaggeration / cfg_weight / temperature.
+#   TEMP (0.8): Chatterbox temperature (turbo ignores exaggeration/cfg).
+#   SPEED (1.0): speak faster/slower via ffmpeg atempo (1.2 = 20% faster). 0.5-2.0.
 #   CHIME: chime name in chimes/ (unset -> auto: matches voice, else weird, else none); set empty for none.
 #   DRY_RUN=1: print the curl/playback commands; synthesize/play nothing.
 #
@@ -41,16 +42,22 @@ n=${#lines[@]}
 [ "$n" -gt 0 ] || die "no lines in $file"
 
 # Chatterbox is peak-normalized server side already, so we don't re-amplify.
-# EXAG = emotion intensity (lower is flatter), CFG = guidance/pacing (raise to
-# counter the slowdown low EXAG causes), TEMP = sampling spread.
-eq="&exaggeration=${EXAG:-0.5}&cfg=${CFG:-0.5}&temperature=${TEMP:-0.8}"
+# Turbo honors only temperature (exaggeration/cfg are ignored server-side).
+eq="&temperature=${TEMP:-0.8}"
 
 gen() { local i="$1"
-  run curl -s -m 300 -X POST "${CBX_SAY_URL}?out=${scr}/${prefix}_${i}.raw.wav${vq}${eq}" --data-binary "${lines[$i]}" >/dev/null
+  local raw="$scr/${prefix}_${i}.raw.wav" final="$scr/${prefix}_${i}.wav"
+  run curl -s -m 300 -X POST "${CBX_SAY_URL}?out=${raw}${vq}${eq}" --data-binary "${lines[$i]}" >/dev/null
   # In dry-run nothing was written, so skip the publish below.
   [ "${DRY_RUN:-0}" = "1" ] && return 0
-  # Publish atomically via mv so the playback loop never sees a half-written clip.
-  mv "$scr/${prefix}_${i}.raw.wav" "$scr/${prefix}_${i}.wav"
+  # Optional tempo change (atempo preserves pitch), then publish atomically via mv
+  # so the playback loop never sees a half-written clip.
+  if [ "${SPEED:-1.0}" != "1.0" ] \
+     && ffmpeg -v error -y -i "$raw" -filter:a "atempo=${SPEED}" "$scr/${prefix}_${i}.spd.wav" 2>/dev/null; then
+    mv "$scr/${prefix}_${i}.spd.wav" "$final"; rm -f "$raw"
+  else
+    mv "$raw" "$final"
+  fi
 }
 
 # Start the chime NOW, concurrently with synthesizing the first line,
