@@ -2,7 +2,7 @@
 # Usage: pipe.sh <prefix> <textfile> [voice]   (one sentence per line)
 #   voice:  server voice key (e.g. "steve"); empty = the server's default voice.
 # Knobs via env vars:
-#   EXAG (0.5), CFG (0.5): Chatterbox exaggeration / cfg_weight.
+#   EXAG (0.5), CFG (0.5), TEMP (0.8): Chatterbox exaggeration / cfg_weight / temperature.
 #   CHIME: chime name in chimes/ (unset -> auto: matches voice, else weird, else none); set empty for none.
 #   DRY_RUN=1: print the curl/playback commands; synthesize/play nothing.
 #
@@ -41,7 +41,9 @@ n=${#lines[@]}
 [ "$n" -gt 0 ] || die "no lines in $file"
 
 # Chatterbox is peak-normalized server side already, so we don't re-amplify.
-eq="&exaggeration=${EXAG:-0.5}&cfg=${CFG:-0.5}"
+# EXAG = emotion intensity (lower is flatter), CFG = guidance/pacing (raise to
+# counter the slowdown low EXAG causes), TEMP = sampling spread.
+eq="&exaggeration=${EXAG:-0.5}&cfg=${CFG:-0.5}&temperature=${TEMP:-0.8}"
 
 gen() { local i="$1"
   run curl -s -m 300 -X POST "${CBX_SAY_URL}?out=${scr}/${prefix}_${i}.raw.wav${vq}${eq}" --data-binary "${lines[$i]}" >/dev/null

@@ -25,4 +25,6 @@ printf '%s' "$text" \
 
 # Scratch prefix (isolates concurrent runs; override so e.g. a Stop hook speaking
 # in the background can't stomp a manual ./qsay.sh's in-flight clips).
-"$dir/pipe.sh" "${QSAY_PREFIX:-qsay}" "$tmp" "$voice"
+# Invoke via `bash` so this doesn't depend on pipe.sh's exec bit (which git
+# checkouts on this WSL setup have repeatedly stripped).
+bash "$dir/pipe.sh" "${QSAY_PREFIX:-qsay}" "$tmp" "$voice"
