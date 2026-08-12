@@ -1,13 +1,14 @@
 """Warm Chatterbox-TTS server: loads the model once, synthesizes on demand.
 
-Runs in the isolated `venv-chatterbox` (chatterbox-tts pins numpy<2 etc., so it
-cannot share the F5 venv). The main F5 server (server.py, port 8765) proxies
-requests with ?engine=chatterbox here; you normally don't hit this port directly.
+Runs in the isolated `venv-chatterbox` (chatterbox-tts pins numpy<2 etc.). The
+bash client (qsay.sh -> pipe.sh) POSTs straight to this port.
 
-POST /say   body = text to speak (raw UTF-8)
-            optional query: ?voice=doctor&exaggeration=0.5&cfg=0.5
-                            &temperature=0.8&out=C:\\path\\reply.wav
-GET  /health -> "ok" once the model is loaded
+POST /say     body = text to speak (raw UTF-8)
+              optional query: ?voice=steve&exaggeration=0.5&cfg=0.5
+                              &temperature=0.8&out=/path/to/reply.wav
+GET  /health  -> "ok" once the model is loaded
+GET  /voices  -> newline-separated discovered voice names
+GET  /chimes  -> newline-separated discovered chime names
 
 Chatterbox clones from a bare reference wav (no transcript needed) and adds an
 `exaggeration` emotion knob (0..1+, 0.5 neutral). cfg_weight ~0.3 keeps pacing
@@ -31,9 +32,9 @@ HOST, PORT = "127.0.0.1", 8766
 TARGET_PEAK = 0.95
 MAX_GAIN = 20.0
 
-# Voices are discovered from the voices/ folder by voicelib (shared with
-# server.py) -- drop an audio file, it's a voice. Chatterbox clones from the
-# bare audio, so no transcript sidecar is needed.
+# Voices are discovered from the voices/ folder by voicelib -- drop an audio
+# file, it's a voice. Chatterbox clones from the bare audio, so no transcript
+# sidecar is needed.
 import httputil
 import voicelib
 
@@ -53,7 +54,9 @@ from chatterbox.tts import ChatterboxTTS
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 TTS = ChatterboxTTS.from_pretrained(device=DEVICE)
 SR = TTS.sr
-# One shared model instance -> serialize inference (same rationale as server.py).
+# One shared model instance -> serialize inference. The HTTP layer stays threaded
+# (connections queue), but only one /say synthesizes at a time, so overlapping
+# requests wait instead of racing and wedging the model.
 INFER_LOCK = threading.Lock()
 print(f"[cbx] model loaded in {time.time()-_t:.1f}s on {DEVICE}", flush=True)
 
@@ -97,6 +100,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, "ok")
         elif path == "/voices":
             self._send(200, "\n".join(sorted(voicelib.voices())))
+        elif path == "/chimes":
+            self._send(200, "\n".join(sorted(voicelib.chimes())))
         else:
             self._send(404, "not found")
 

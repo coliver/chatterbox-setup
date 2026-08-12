@@ -4,17 +4,16 @@
 # chime) while the rest render in the background. Time-to-first-word
 # is just the first sentence, so KEEP THE FIRST SENTENCE SHORT.
 #
-# Usage: qsay.sh "text to speak" [voice] [engine]
+# Usage: qsay.sh "text to speak" [voice]
 #   voice:  server voice key (default steve)
-#   engine: "chatterbox" (default) or "f5" (needs the 8765 server running)
-#   engine knobs via env: chatterbox EXAG/CFG, f5 NFE; chime via CHIME (see pipe.sh)
+#   knobs via env: EXAG/CFG (Chatterbox); chime via CHIME (see pipe.sh)
 #   DRY_RUN=1: passed through to pipe.sh (print commands; synthesize/play nothing)
 set -euo pipefail
 
-text="${1:-}"; voice="${2:-steve}"; engine="${3:-chatterbox}"
+text="${1:-}"; voice="${2:-steve}"
 dir="$(cd "$(dirname "$0")" && pwd)"       # this script's folder
 . "$dir/lib/common.sh"
-[ -n "$text" ] || die "usage: qsay.sh \"text\" [voice] [engine]"
+[ -n "$text" ] || die "usage: qsay.sh \"text\" [voice]"
 
 # One sentence per line: break after . ! ? (keeping the punctuation), trim blanks.
 tmp="$(mktemp)"
@@ -24,4 +23,4 @@ printf '%s' "$text" \
   | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
   | grep -v '^$' > "$tmp" || true   # grep exits 1 if every line was blank; not an error here
 
-"$dir/pipe.sh" qsay "$tmp" "$voice" "$engine"
+"$dir/pipe.sh" qsay "$tmp" "$voice"

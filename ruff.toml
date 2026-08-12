@@ -10,8 +10,7 @@ extend-exclude = ["venv", "venv-chatterbox"]
 select = ["E4", "E7", "E9", "F", "I"]
 
 [lint.per-file-ignores]
-# The servers import the heavy ML libs (torch / f5_tts / chatterbox) lazily --
-# after a "loading model..." print and inside the load-timing block -- on
-# purpose, so E402 (module import not at top of file) is expected there.
-"server.py" = ["E402"]
+# The server imports the heavy ML libs (torch / chatterbox) lazily -- after a
+# "loading model..." print and inside the load-timing block -- on purpose, so
+# E402 (module import not at top of file) is expected there.
 "chatterbox_server.py" = ["E402"]

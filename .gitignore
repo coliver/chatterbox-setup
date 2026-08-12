@@ -13,11 +13,11 @@ logs/
 # Generated / streamed audio and scratch clips
 scratch/
 
-# Voice and chime assets — keep the folders, not the contents
-voices/*
-chimes/*
-!voices/.gitkeep
-!chimes/.gitkeep
+# Voice and chime assets. On this machine voices/ and chimes/ are symlinks to the
+# Windows source (C:\Users\chris\tts\...), so drops there appear here instantly.
+# Ignore them entirely — both the symlinks and any contents are machine-specific.
+/voices
+/chimes
 
 # Local Claude Code tooling config (may contain machine-specific paths)
 .claude/

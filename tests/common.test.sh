@@ -9,8 +9,7 @@ check() { # check <desc> <expected> <actual>
   if [ "$2" = "$3" ]; then echo "ok   - $1"; else echo "FAIL - $1: expected '$2' got '$3'"; fail=1; fi
 }
 
-check "engine_base f5"         "http://127.0.0.1:8765/say" "$(engine_base f5)"
-check "engine_base chatterbox" "http://127.0.0.1:8766/say" "$(engine_base chatterbox)"
+check "CBX_SAY_URL" "http://127.0.0.1:8766/say" "$CBX_SAY_URL"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT

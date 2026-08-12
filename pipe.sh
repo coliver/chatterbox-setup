@@ -1,25 +1,23 @@
 #!/bin/bash
-# Usage: pipe.sh <prefix> <textfile> [voice] [engine]   (one sentence per line)
+# Usage: pipe.sh <prefix> <textfile> [voice]   (one sentence per line)
 #   voice:  server voice key (e.g. "steve"); empty = the server's default voice.
-#   engine: "chatterbox" (default, better quality) or "f5" (faster, needs 8765 up).
-# Engine-specific knobs via env vars:
-#   chatterbox: EXAG (0.5), CFG (0.5)      f5: NFE (16), GAIN (1.5 amplify)
+# Knobs via env vars:
+#   EXAG (0.5), CFG (0.5): Chatterbox exaggeration / cfg_weight.
 #   CHIME: chime name in chimes/ (unset -> auto: matches voice, else weird, else none); set empty for none.
-#   DRY_RUN=1: print the curl/ffmpeg/playback commands; synthesize/play nothing.
+#   DRY_RUN=1: print the curl/playback commands; synthesize/play nothing.
 #
 # Latency: the first line is synthesized before anything plays, so keep it SHORT.
 # The chime plays concurrently with that first synth, so it doesn't add latency.
 set -euo pipefail
 
-prefix="${1:-}"; file="${2:-}"; voice="${3:-}"; engine="${4:-chatterbox}"
+prefix="${1:-}"; file="${2:-}"; voice="${3:-}"
 dir="$(cd "$(dirname "$0")" && pwd)"       # this script's folder (POSIX path)
 . "$dir/lib/common.sh"
 
-[ -n "$prefix" ] || die "usage: pipe.sh <prefix> <textfile> [voice] [engine]"
+[ -n "$prefix" ] || die "usage: pipe.sh <prefix> <textfile> [voice]"
 [ -f "$file" ]   || die "text file not found: $file"
 
 scr="$dir/scratch"; mkdir -p "$scr"        # generated clips live here, not the repo root
-winscr="$(cygpath -w "$scr")"              # scratch as a Windows path (for the server's ?out=)
 vq=""
 if [ -n "$voice" ]; then vq="&voice=${voice}"; fi
 # Chime: CHIME unset -> "auto" (chime matching the voice, else weird, else none).
@@ -40,27 +38,15 @@ mapfile -t lines < "$file"
 n=${#lines[@]}
 [ "$n" -gt 0 ] || die "no lines in $file"
 
-# Pick the engine's server + query knobs. Chatterbox is peak-normalized server
-# side already, so we don't re-amplify it; F5 isn't, so we boost it via ffmpeg.
-base="$(engine_base "$engine")"
-if [ "$engine" = "chatterbox" ]; then
-  eq="&exaggeration=${EXAG:-0.5}&cfg=${CFG:-0.5}"; gain="1.0"
-else
-  eq="&nfe=${NFE:-16}"; gain="${GAIN:-1.5}"
-fi
+# Chatterbox is peak-normalized server side already, so we don't re-amplify.
+eq="&exaggeration=${EXAG:-0.5}&cfg=${CFG:-0.5}"
 
 gen() { local i="$1"
-  run curl -s -m 300 -X POST "${base}?out=${winscr}\\${prefix}_${i}.raw.wav${vq}${eq}" --data-binary "${lines[$i]}" >/dev/null
-  # In dry-run nothing was written, so skip the file juggling below.
+  run curl -s -m 300 -X POST "${CBX_SAY_URL}?out=${scr}/${prefix}_${i}.raw.wav${vq}${eq}" --data-binary "${lines[$i]}" >/dev/null
+  # In dry-run nothing was written, so skip the publish below.
   [ "${DRY_RUN:-0}" = "1" ] && return 0
-  if [ "$gain" = "1.0" ]; then
-    mv "$scr/${prefix}_${i}.raw.wav" "$scr/${prefix}_${i}.wav"   # already normalized -> no re-encode
-  # Amplify (limiter guards against clipping), then publish atomically via mv.
-  elif ffmpeg -v error -y -i "$scr/${prefix}_${i}.raw.wav" -af "volume=${gain},alimiter=limit=0.97" "$scr/${prefix}_${i}.amp.wav" 2>/dev/null; then
-    mv "$scr/${prefix}_${i}.amp.wav" "$scr/${prefix}_${i}.wav"; rm -f "$scr/${prefix}_${i}.raw.wav"
-  else
-    mv "$scr/${prefix}_${i}.raw.wav" "$scr/${prefix}_${i}.wav"   # ffmpeg unavailable -> play unamplified
-  fi
+  # Publish atomically via mv so the playback loop never sees a half-written clip.
+  mv "$scr/${prefix}_${i}.raw.wav" "$scr/${prefix}_${i}.wav"
 }
 
 # Start the chime NOW, concurrently with synthesizing the first line,

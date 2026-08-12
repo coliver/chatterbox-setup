@@ -44,25 +44,28 @@ class DiscoverTests(unittest.TestCase):
         self.assertTrue(found["jarvis"].endswith("jarvis.wav"))
 
 
-class TranscriptTests(unittest.TestCase):
+class RegistryTests(unittest.TestCase):
+    """voices()/chimes() are thin wrappers that discover from the configured
+    dirs; point those dirs at a temp folder and confirm they find dropped files."""
+
     def setUp(self):
         self._tmp = tempfile.TemporaryDirectory()
         self.dir = self._tmp.name
+        self._orig = (voicelib.VOICES_DIR, voicelib.CHIMES_DIR)
 
     def tearDown(self):
+        voicelib.VOICES_DIR, voicelib.CHIMES_DIR = self._orig
         self._tmp.cleanup()
 
-    def test_returns_none_without_sidecar(self):
-        audio = os.path.join(self.dir, "steve.wav")
-        open(audio, "w").close()
-        self.assertIsNone(voicelib.transcript(audio))
+    def test_voices_reads_voices_dir(self):
+        voicelib.VOICES_DIR = self.dir
+        open(os.path.join(self.dir, "steve.wav"), "w").close()
+        self.assertEqual(set(voicelib.voices()), {"steve"})
 
-    def test_reads_and_strips_sidecar(self):
-        audio = os.path.join(self.dir, "steve.wav")
-        open(audio, "w").close()
-        with open(os.path.join(self.dir, "steve.txt"), "w", encoding="utf-8") as f:
-            f.write("  hello there  \n")
-        self.assertEqual(voicelib.transcript(audio), "hello there")
+    def test_chimes_reads_chimes_dir(self):
+        voicelib.CHIMES_DIR = self.dir
+        open(os.path.join(self.dir, "weird.wav"), "w").close()
+        self.assertEqual(set(voicelib.chimes()), {"weird"})
 
 
 if __name__ == "__main__":
