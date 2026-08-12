@@ -15,6 +15,18 @@ dir="$(cd "$(dirname "$0")" && pwd)"       # this script's folder
 . "$dir/lib/common.sh"
 [ -n "$text" ] || die "usage: qsay.sh \"text\" [voice]"
 
+# Pronunciation fixes: respell words the TTS mispronounces (whole-word, case-
+# insensitive) from pronounce.txt. Chatterbox has no phoneme input, so this is
+# the only lever. Skips blank/comment lines.
+pron="$dir/pronounce.txt"
+if [ -f "$pron" ]; then
+  while read -r from to _; do
+    [ -z "$from" ] && continue
+    case "$from" in \#*) continue ;; esac
+    text="$(printf '%s' "$text" | sed -E "s/\\b${from}\\b/${to}/gI")"
+  done < "$pron"
+fi
+
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 if [ "${NOSPLIT:-0}" = "1" ]; then

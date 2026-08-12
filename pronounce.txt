@@ -1,0 +1,4 @@
+# Pronunciation fixes: respell words the TTS mispronounces so they sound right.
+# Format: <word> <replacement>   (whole-word, case-insensitive; '#' = comment)
+# Chatterbox has no phoneme input, so the only lever is respelling the text.
+wav wave
