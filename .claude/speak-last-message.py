@@ -26,7 +26,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.dirname(HERE)
 QSAY = os.path.join(PROJECT, "qsay.sh")
-VOICE = os.environ.get("SHIP_HOOK_VOICE", "jarvis-02")  # talkback voice (SPEED 1.2)
+VOICE = os.environ.get("SHIP_HOOK_VOICE", "jarvis-03")  # talkback voice (SPEED 1.2)
 LOCKFILE = os.path.join(HERE, ".speak.pid")
 LASTFILE = os.path.join(HERE, ".speak.last")  # hash of the message last spoken
 

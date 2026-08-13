@@ -41,9 +41,22 @@ else
   # first chunk sent to synthesis, so speech starts sooner even when the
   # lead sentence runs long. Only commas followed by whitespace split (so
   # "3,000" stays intact).
+  #
+  # Exception: a comma list ("bob, jack, and sally") would otherwise
+  # fragment into near-empty clips ("jack," / "and sally" as their own
+  # files/clips). Protect commas inside a run of 2+ short (<=3 word) items
+  # ending in "and/or/nor <item>" with a placeholder (\x01) before
+  # splitting, then restore them after, so the whole list stays one line.
+  # Item words exclude and/or/nor themselves so the FIRST such conjunction
+  # is always the list's terminator, not swallowed as another item (else
+  # "bob, jack, and sally, and they agreed" over-merges into one line). A
+  # lone "X, and Y" (independent clauses, not a list) needs 2+ items to
+  # trigger, so it still splits as before.
   printf '%s' "$text" \
+    | perl -pe 's/((?:(?:(?!(?:and|or|nor)\b)[\w-]+)(?:\s+(?!(?:and|or|nor)\b)[\w-]+){0,2},\s+){2,})(and|or|nor)\s+((?:(?!(?:and|or|nor)\b)[\w-]+)(?:\s+(?!(?:and|or|nor)\b)[\w-]+){0,2})/my ($i,$c2,$c3)=($1,$2,$3); $i=~s{,\s+}{\x01}g; "$i$c2 $c3"/gie' \
     | sed -E 's/([.!?,]+)[[:space:]]+/\1\n/g' \
     | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
+    | sed $'s/\x01/, /g' \
     | grep -v '^$' > "$tmp" || true   # grep exits 1 if every line blank; fine here
 fi
 
