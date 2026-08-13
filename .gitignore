@@ -19,5 +19,9 @@ scratch/
 /voices
 /chimes
 
+# Ad-hoc voice reference backups (binary, machine-specific, same reasoning
+# as voices/ above)
+/voice-backups
+
 # Local Claude Code tooling config (may contain machine-specific paths)
 .claude/

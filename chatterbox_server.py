@@ -19,6 +19,7 @@ GET  /chimes  -> newline-separated discovered chime names
 """
 
 import os
+import tempfile
 import threading
 import time
 import warnings
@@ -27,7 +28,7 @@ from urllib.parse import parse_qs, urlparse
 
 warnings.filterwarnings("ignore")
 
-HOST, PORT = "127.0.0.1", 8766
+HOST, PORT = os.environ.get("CBX_HOST", "0.0.0.0"), 8766  # 0.0.0.0 = reachable on LAN
 
 # Chatterbox output is very quiet (raw peak ~0.11). Peak-normalize each clip up
 # to near full scale so the voice is actually loud. Cap the gain so a near-silent
@@ -126,12 +127,32 @@ class Handler(BaseHTTPRequestHandler):
             self._send(400, str(e))
             return
         out = q.get("out", [DEFAULT_OUT])[0]
+        stream = q.get("stream", ["0"])[0] not in ("0", "", "false", "no")
         n = int(self.headers.get("Content-Length", 0))
         text = self.rfile.read(n).decode("utf-8").strip()
         if not text:
             self._send(400, "empty text")
             return
         t0 = time.time()
+        # Remote clients (?stream=1) get the wav bytes in the response body; the
+        # server-side file is irrelevant to them, so synth to a temp path and
+        # return it. Local clients keep passing ?out=... and read that file.
+        if stream:
+            tmp = os.path.join(tempfile.gettempdir(), f"cbx_{os.getpid()}_{int(t0*1000)}.wav")
+            try:
+                synth(text, voices[voice], temperature, tmp)
+                with open(tmp, "rb") as fh:
+                    audio = fh.read()
+            except Exception as e:
+                self._send(500, f"error: {e}")
+                return
+            finally:
+                try:
+                    os.remove(tmp)
+                except OSError:
+                    pass
+            self._send_bytes(200, audio, "audio/wav")
+            return
         try:
             synth(text, voices[voice], temperature, out)
         except Exception as e:
@@ -146,6 +167,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(b)))
         self.end_headers()
         self.wfile.write(b)
+
+    def _send_bytes(self, code, data, ctype):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
 
 
 if __name__ == "__main__":
