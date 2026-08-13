@@ -1,8 +1,8 @@
 #!/bin/bash
-# Low-latency "say": split a string into sentences and stream them through
-# pipe.sh, which synthesizes+plays the first sentence ASAP (overlapping the
-# chime) while the rest render in the background. Time-to-first-word
-# is just the first sentence, so KEEP THE FIRST SENTENCE SHORT.
+# Low-latency "say": split a string into clauses (on . ! ? and ,) and stream
+# them through pipe.sh, which synthesizes+plays the first clause ASAP
+# (overlapping the chime) while the rest render in the background.
+# Time-to-first-word is just the first clause, so KEEP IT SHORT.
 #
 # Usage: qsay.sh "text to speak" [voice]
 #   voice:  server voice key (default steve)
@@ -36,9 +36,13 @@ if [ "${NOSPLIT:-0}" = "1" ]; then
   # newlines/whitespace so it stays a single line for pipe.sh's mapfile.
   printf '%s' "$text" | tr '\n' ' ' | sed -E 's/[[:space:]]+/ /g; s/^ //; s/ $//' > "$tmp"
 else
-  # One sentence per line: break after . ! ? (keeping punctuation), trim blanks.
+  # One clause per line: break after . ! ? or , (keeping punctuation), trim
+  # blanks. Splitting on commas too (not just sentence ends) shortens the
+  # first chunk sent to synthesis, so speech starts sooner even when the
+  # lead sentence runs long. Only commas followed by whitespace split (so
+  # "3,000" stays intact).
   printf '%s' "$text" \
-    | sed -E 's/([.!?]+)[[:space:]]+/\1\n/g' \
+    | sed -E 's/([.!?,]+)[[:space:]]+/\1\n/g' \
     | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
     | grep -v '^$' > "$tmp" || true   # grep exits 1 if every line blank; fine here
 fi
