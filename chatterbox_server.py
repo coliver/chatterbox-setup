@@ -63,6 +63,16 @@ import torch
 from chatterbox.tts_turbo import ChatterboxTurboTTS  # not exported at package top level
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+# The turbo model loads in fp32. On Ampere (this box is an RTX 3070, cap 8.6) the
+# autoregressive token decode is matmul-heavy and was leaving the tensor cores
+# idle. TF32 runs those matmuls on the tensor cores at ~fp16 speed with fp32-ish
+# range (negligible quality change for TTS), and cudnn.benchmark lets conv-heavy
+# s3gen pick fast kernels for the (now fixed) shapes. Both are quality-safe and
+# reversible; they directly target the ~30 tok/s decode floor behind playback gaps.
+if DEVICE == "cuda":
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.backends.cudnn.benchmark = True
 TTS = ChatterboxTurboTTS.from_pretrained(device=DEVICE)
 SR = TTS.sr
 # One shared model instance -> serialize inference. The HTTP layer stays threaded
