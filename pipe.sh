@@ -29,9 +29,11 @@ chime="$(resolve_chime "${CHIME:-auto}" "$voice" "$dir/chimes")"
 # doesn't leave scratch behind); also kill the background synth if still running.
 # KEEP_SCRATCH=1 leaves the generated clips in scratch/ for inspection (skips
 # both the pre-clean and the exit cleanup); the background synth is still reaped.
-synth_pid=""
+synth_pid=""; player_pid=""; player_fifo=""
 cleanup() {
   if [ -n "$synth_pid" ]; then kill "$synth_pid" 2>/dev/null || true; fi
+  if [ -n "$player_pid" ]; then kill "$player_pid" 2>/dev/null || true; fi
+  [ -n "$player_fifo" ] && rm -f "$player_fifo" 2>/dev/null || true
   [ "${KEEP_SCRATCH:-0}" = "1" ] || rm -f "$scr/${prefix}_"*.wav 2>/dev/null || true
 }
 trap cleanup EXIT
@@ -83,6 +85,21 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   exit 0
 fi
 
+# ONE long-lived PowerShell player instead of a fresh spawn per clip. Spawning
+# powershell+SoundPlayer costs ~0.5s of cold-start, which — paid at every clip
+# boundary — was the audible dead air between sentences. Here that cost is paid
+# once: the player loops reading Windows wav paths on stdin and PlaySync's each,
+# so consecutive clips play back-to-back. We feed it a path only once the clip
+# exists, preserving the stream-as-you-synthesize behavior. (SoundPlayer plays
+# PCM wav only, same constraint as play().)
+player_fifo="$scr/${prefix}.play.fifo"
+rm -f "$player_fifo"; mkfifo "$player_fifo"
+powershell.exe -NoProfile -Command \
+  'while($l=[Console]::In.ReadLine()){(New-Object Media.SoundPlayer $l).PlaySync()}' \
+  < "$player_fifo" &
+player_pid=$!
+exec 3>"$player_fifo"   # hold the write end open across the loop
+
 for ((i = 0; i < n; i++)); do
   # Wait (bounded) for clip i; if the background synth died without producing it,
   # bail instead of hanging forever.
@@ -91,6 +108,8 @@ for ((i = 0; i < n; i++)); do
     sleep 0.1; waited=$((waited + 1))
     if [ "$waited" -gt 3000 ]; then die "timed out waiting for clip $i (synthesis failed?)"; fi
   done
-  play "$scr/${prefix}_${i}.wav"
+  printf '%s\n' "$(wslpath -w "$scr/${prefix}_${i}.wav")" >&3
 done
+exec 3>&-              # EOF -> player exits after finishing the last clip
+wait "$player_pid" 2>/dev/null || true
 echo "done ($n clips)"
