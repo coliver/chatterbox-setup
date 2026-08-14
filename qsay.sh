@@ -58,9 +58,13 @@ else
   # not "You're right," + "sir.". Both positions count -- trailing (", sir")
   # and leading ("Sir, ..."). Same \x01 placeholder, restored at the end.
   vocatives='sir|sirs|madam|madame|ma.?am|milord|milady|mistress|gentlemen'
+  # Sequence lead-ins ("First, ..." / "Second, ...") get the same treatment, but
+  # leading-only and anchored to sentence start, so a mid-sentence "do this
+  # first, then that" still splits normally.
+  leadins='first|second|third|fourth|fifth|finally|lastly'
   printf '%s' "$text" \
     | perl -pe 's/((?:(?:(?!(?:and|or|nor)\b)[\w-]+)(?:\s+(?!(?:and|or|nor)\b)[\w-]+){0,2},\s+){2,})(and|or|nor)\s+((?:(?!(?:and|or|nor)\b)[\w-]+)(?:\s+(?!(?:and|or|nor)\b)[\w-]+){0,2})/my ($i,$c2,$c3)=($1,$2,$3); $i=~s{,\s+}{\x01}g; "$i$c2 $c3"/gie' \
-    | perl -pe "s/,\\s+(?=(?:$vocatives)\\b)/\\x01/gi; s/\\b((?:$vocatives)),\\s+/\$1\\x01/gi" \
+    | perl -pe "s/,\\s+(?=(?:$vocatives)\\b)/\\x01/gi; s/\\b((?:$vocatives)),\\s+/\$1\\x01/gi; s/(^|[.!?]\\s+)((?:$leadins)),\\s+/\$1\$2\\x01/gi" \
     | sed -E 's/([.!?,]+)[[:space:]]+/\1\n/g' \
     | sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//' \
     | sed $'s/\x01/, /g' \
