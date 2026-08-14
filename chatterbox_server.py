@@ -66,13 +66,19 @@ DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
 # The turbo model loads in fp32. On Ampere (this box is an RTX 3070, cap 8.6) the
 # autoregressive token decode is matmul-heavy and was leaving the tensor cores
 # idle. TF32 runs those matmuls on the tensor cores at ~fp16 speed with fp32-ish
-# range (negligible quality change for TTS), and cudnn.benchmark lets conv-heavy
-# s3gen pick fast kernels for the (now fixed) shapes. Both are quality-safe and
-# reversible; they directly target the ~30 tok/s decode floor behind playback gaps.
+# range (negligible quality change for TTS) -- that's the real win here, and it's
+# quality-safe and reversible.
+#
+# cudnn.benchmark is deliberately LEFT OFF: measured, it HURT this workload. The
+# t3 AR decode runs at a new sequence length every step, so benchmark re-autotunes
+# cudnn kernels mid-generation -- the stalls that dropped decode from ~40 to ~6
+# tok/s. Turning it off took the long-line realtime factor from ~1.1 (stally) to
+# ~0.6 (steady, faster than realtime), which is what keeps streamed playback
+# gapless. (It only helps fixed-shape conv nets; our decode isn't one.)
 if DEVICE == "cuda":
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
-    torch.backends.cudnn.benchmark = True
+    torch.backends.cudnn.benchmark = False
 TTS = ChatterboxTurboTTS.from_pretrained(device=DEVICE)
 SR = TTS.sr
 # One shared model instance -> serialize inference. The HTTP layer stays threaded

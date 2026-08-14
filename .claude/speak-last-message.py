@@ -7,9 +7,11 @@ JSON on stdin ({"transcript_path": "...", ...}), pulls the most recent assistant
 qsay.sh for streaming synthesis+playback.
 
 Playback is launched detached (its own session/process group) so the hook returns
-immediately instead of blocking the UI on synthesis. A lockfile holds the PID of
-the previous utterance's group; a new turn kills it first, so a fresh response
-supersedes an old one still talking instead of overlapping it.
+immediately instead of blocking the UI on synthesis. Each utterance runs under an
+exclusive flock (PLAYLOCK): a new reply WAITS for the one still speaking to finish
+and then plays, so replies queue back-to-back instead of interrupting each other.
+When nothing is speaking the lock is free, so a reply with nothing ahead of it
+starts with no added wait.
 
 Exits 0 silently on anything unexpected -- a talkback hook must never wedge or
 block the turn.
@@ -18,7 +20,6 @@ import hashlib
 import json
 import os
 import re
-import signal
 import subprocess
 import sys
 import time
@@ -27,8 +28,12 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.dirname(HERE)
 QSAY = os.path.join(PROJECT, "qsay.sh")
 VOICE = os.environ.get("SHIP_HOOK_VOICE", "jarvis-03")  # talkback voice (SPEED 1.2)
-LOCKFILE = os.path.join(HERE, ".speak.pid")
 LASTFILE = os.path.join(HERE, ".speak.last")  # hash of the message last spoken
+# Serialize spoken replies: each utterance runs under an exclusive flock on this
+# file, so a new reply WAITS for the one still speaking to finish instead of
+# interrupting it (queue, don't supersede). When nothing is speaking the lock is
+# free and there's no wait, so the common case is unchanged.
+PLAYLOCK = os.path.join(PROJECT, "scratch", "talk.play.lock")
 
 # The Stop hook fires before the just-finished message is flushed to the
 # transcript JSONL, so a naive read grabs the PREVIOUS message. We snapshot the
@@ -105,39 +110,6 @@ def despeakify(text):
     return text.strip()
 
 
-def kill_previous():
-    """Terminate the prior utterance so a new turn supersedes it.
-
-    Two kills are needed: the WSL process group (qsay/pipe.sh), and the
-    Windows SoundPlayer that actually emits audio. The player is launched via
-    interop (powershell.exe ... PlaySync), so it is NOT in the WSL process
-    group -- SIGTERM alone leaves the old clip playing over the new one. We
-    stop only players whose command line references a hook clip (hook_*.wav),
-    so a manual ./qsay.sh (prefix "qsay") is left alone.
-    """
-    try:
-        with open(LOCKFILE) as f:
-            pgid = int(f.read().strip())
-    except (OSError, ValueError):
-        pgid = None
-    if pgid is not None:
-        try:
-            os.killpg(pgid, signal.SIGTERM)
-        except (ProcessLookupError, PermissionError, OSError):
-            pass
-    try:
-        subprocess.run(
-            ["powershell.exe", "-NoProfile", "-Command",
-             "Get-CimInstance Win32_Process -Filter \"Name='powershell.exe'\" | "
-             "Where-Object { $_.ProcessId -ne $PID -and $_.CommandLine -match 'hook_' -and "
-             "$_.CommandLine -match 'PlaySync' } | "
-             "ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=5,
-        )
-    except (OSError, subprocess.SubprocessError):
-        pass
-
-
 def read_last_hash():
     try:
         with open(LASTFILE) as f:
@@ -201,7 +173,6 @@ def main():
     # "none" still disables (pipe.sh treats a missing wav as no chime).
     chime = chime_from(last_assistant_text(tpath)) or os.environ.get("SHIP_HOOK_CHIME", "ship-combadge")
 
-    kill_previous()
     # Distinct scratch prefix so background hook speech never stomps a manual
     # ./qsay.sh (which defaults to the "qsay" prefix).
     env = dict(
@@ -218,20 +189,21 @@ def main():
     log = open(os.path.join(HERE, "speak.log"), "w")  # noqa: SIM115 (lives with child)
     log.write(f"==== {time.strftime('%H:%M:%S')} launching: {text[:60]!r} chime={chime or '-'}\n")
     log.flush()
-    proc = subprocess.Popen(
-        ["bash", QSAY, text, VOICE],
+    # Launch detached (own session) so this hook returns at once and never blocks
+    # the turn. `flock -x PLAYLOCK` makes the child hold an exclusive lock for its
+    # whole synth+playback: if a prior reply is still speaking it WAITS its turn,
+    # so replies queue and play back-to-back instead of interrupting. Free lock ->
+    # no wait, so a reply with nothing ahead of it starts immediately as before.
+    os.makedirs(os.path.dirname(PLAYLOCK), exist_ok=True)
+    subprocess.Popen(
+        ["flock", "-x", PLAYLOCK, "bash", QSAY, text, VOICE],
         stdin=subprocess.DEVNULL,
         stdout=log,
         stderr=log,
-        start_new_session=True,  # own process group -> killable as a unit
+        start_new_session=True,
         cwd=PROJECT,
         env=env,
     )
-    try:
-        with open(LOCKFILE, "w") as f:
-            f.write(str(proc.pid))  # pgid == pid for a session leader
-    except OSError:
-        pass
 
 
 if __name__ == "__main__":
