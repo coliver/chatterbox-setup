@@ -29,3 +29,6 @@ scratch/
 
 # Local Claude Code tooling config (may contain machine-specific paths)
 .claude/
+
+# Personal backup archives (machine-specific, never commit)
+/backups/

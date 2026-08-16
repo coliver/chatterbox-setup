@@ -186,7 +186,7 @@ def main():
     env = dict(
         os.environ,
         QSAY_PREFIX=f"hook-{salt}",
-        TEMP="0.5",    # turbo honors only temperature
+        TEMP="0.6",    # turbo honors only temperature
         SPEED="1.2",   # 20% faster delivery (atempo) -- user preference
         # Sentence-streaming (qsay default): short first sentence -> fast first
         # word. Turbo synthesizes faster than realtime, so streaming stays

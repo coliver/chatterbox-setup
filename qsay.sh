@@ -5,12 +5,13 @@
 # Time-to-first-word is just the first clause, so KEEP IT SHORT.
 #
 # Usage: qsay.sh "text to speak" [voice]
-#   voice:  server voice key (default steve)
+#   voice:  server voice key (default ship; turbo needs a >5s reference clip,
+#           so short-clip voices like steve/tom/q/q2 won't work here)
 #   knobs via env: EXAG/CFG (Chatterbox); chime via CHIME (see pipe.sh)
 #   DRY_RUN=1: passed through to pipe.sh (print commands; synthesize/play nothing)
 set -euo pipefail
 
-text="${1:-}"; voice="${2:-steve}"
+text="${1:-}"; voice="${2:-ship}"
 dir="$(cd "$(dirname "$0")" && pwd)"       # this script's folder
 . "$dir/lib/common.sh"
 [ -n "$text" ] || die "usage: qsay.sh \"text\" [voice]"
