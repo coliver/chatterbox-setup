@@ -15,9 +15,13 @@ scratch/
 
 # Voice and chime assets. On this machine voices/ and chimes/ are symlinks to the
 # Windows source (C:\Users\chris\tts\...), so drops there appear here instantly.
-# Ignore them entirely — both the symlinks and any contents are machine-specific.
-/voices
-/chimes
+# Ignore the contents (and a symlink standing in for the folder) since they're
+# machine-specific binary audio -- but keep the folders themselves tracked
+# (via .gitkeep) so a fresh clone has somewhere to drop files.
+/voices/*
+/chimes/*
+!/voices/.gitkeep
+!/chimes/.gitkeep
 
 # Ad-hoc voice reference backups (binary, machine-specific, same reasoning
 # as voices/ above)
