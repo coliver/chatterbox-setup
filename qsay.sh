@@ -23,7 +23,12 @@ if [ -f "$pron" ]; then
   while read -r from to _; do
     [ -z "$from" ] && continue
     case "$from" in \#*) continue ;; esac
-    text="$(printf '%s' "$text" | sed -E "s/\\b${from}\\b/${to}/gI")"
+    # Escape regex metacharacters in `from` (pattern side) and `&`/`/`/`\` in
+    # `to` (replacement side) before interpolating -- an unescaped entry
+    # (e.g. "c++") would otherwise break or misbehave as a sed pattern.
+    from_esc="$(printf '%s' "$from" | sed -E 's/[.[\*^$/\\]/\\&/g')"
+    to_esc="$(printf '%s' "$to" | sed -E 's/[&/\\]/\\&/g')"
+    text="$(printf '%s' "$text" | sed -E "s/\\b${from_esc}\\b/${to_esc}/gI")"
   done < "$pron"
 fi
 
@@ -57,7 +62,7 @@ else
   # peel off into a near-empty clip: "You're right, sir." must stay one line,
   # not "You're right," + "sir.". Both positions count -- trailing (", sir")
   # and leading ("Sir, ..."). Same \x01 placeholder, restored at the end.
-  vocatives='sir|sirs|madam|madame|ma.?am|milord|milady|mistress|gentlemen'
+  vocatives='sir|sirs|madam|madame|ma.?am|milord|milady|mistress|gentlemen|number one'
   # Sequence lead-ins ("First, ..." / "Second, ...") get the same treatment, but
   # leading-only and anchored to sentence start, so a mid-sentence "do this
   # first, then that" still splits normally.

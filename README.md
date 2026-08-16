@@ -94,12 +94,19 @@ With no `CHIME` set, a chime named after the voice is used, else `weird`, else n
 | Param          | Default            | Notes                                  |
 |----------------|--------------------|----------------------------------------|
 | `voice`        | `ship`             | must exist in `voices/`, reference > 5 s |
-| `out`          | `scratch/reply.wav`| output wav path                        |
+| `out`          | `scratch/reply.wav`| **filename only** — confined to `scratch/`, any directory component is stripped |
 | `temperature`  | `0.8`              | number                                 |
 
 `exaggeration`/`cfg` are accepted (client compatibility) but ignored by turbo.
 Malformed numeric params return `400` with a message. Other endpoints:
-`GET /health` → `ok`, `GET /voices`, `GET /chimes`.
+`GET /health` → `ok` (never requires auth), `GET /voices`, `GET /chimes`.
+
+**Auth (opt-in):** the server binds `0.0.0.0` (LAN-reachable) with no auth by
+default. Set `CBX_TOKEN=<secret>` in the environment `reboot.sh` starts the
+server in, and the same value in the environment `qsay.sh`/the Claude Code
+Stop hook run under, to require it — requests must then send it as either the
+`X-Auth-Token` header or `?token=` query param, or get `401`. Leave unset for
+unchanged (no-auth) behavior.
 
 ## Tests
 
