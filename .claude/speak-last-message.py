@@ -27,7 +27,7 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.dirname(HERE)
 QSAY = os.path.join(PROJECT, "qsay.sh")
-VOICE = os.environ.get("SHIP_HOOK_VOICE", "jarvis-03")  # talkback voice (SPEED 1.2)
+VOICE = os.environ.get("SHIP_HOOK_VOICE", "data-wellington")  # talkback voice (SPEED 1.2)
 LASTFILE = os.path.join(HERE, ".speak.last")  # hash of the message last spoken
 # Serialize spoken replies: each utterance runs under an exclusive flock on this
 # file, so a new reply WAITS for the one still speaking to finish instead of
@@ -175,14 +175,26 @@ def main():
 
     # Distinct scratch prefix so background hook speech never stomps a manual
     # ./qsay.sh (which defaults to the "qsay" prefix).
+    # Salt the scratch prefix per invocation (pid + sub-second time) so this run's
+    # clips can never collide with a prior run's leftovers. Without this,
+    # KEEP_SCRATCH=1 is unsafe: pipe.sh's "wait for clip i" loop only checks that
+    # the file EXISTS (pipe.sh:107), so a stale same-named file from an earlier
+    # reply satisfies that check instantly and gets played in place of the new
+    # (still-synthesizing) clip -- surfaced as a queued reply audibly playing the
+    # wrong content. A unique prefix sidesteps the race entirely.
+    salt = f"{os.getpid()}-{int(time.time() * 1000) % 100000}"
     env = dict(
         os.environ,
-        QSAY_PREFIX="hook",
-        TEMP="0.4",    # turbo honors only temperature
+        QSAY_PREFIX=f"hook-{salt}",
+        TEMP="0.5",    # turbo honors only temperature
         SPEED="1.2",   # 20% faster delivery (atempo) -- user preference
         # Sentence-streaming (qsay default): short first sentence -> fast first
         # word. Turbo synthesizes faster than realtime, so streaming stays
         # gapless too.
+        # KEEP_SCRATCH left unset (default: 0) -- clips are cleaned up per run
+        # again. Diagnosis of the runaway-silence bug is done (upstream issue:
+        # github.com/resemble-ai/chatterbox#531); the salted-prefix fix above
+        # stays regardless, since it also closes a stale-clip playback race.
     )
     if chime:
         env["CHIME"] = chime
@@ -190,13 +202,14 @@ def main():
     log.write(f"==== {time.strftime('%H:%M:%S')} launching: {text[:60]!r} chime={chime or '-'}\n")
     log.flush()
     # Launch detached (own session) so this hook returns at once and never blocks
-    # the turn. `flock -x PLAYLOCK` makes the child hold an exclusive lock for its
-    # whole synth+playback: if a prior reply is still speaking it WAITS its turn,
-    # so replies queue and play back-to-back instead of interrupting. Free lock ->
-    # no wait, so a reply with nothing ahead of it starts immediately as before.
+    # the turn. Synthesis starts immediately, unlocked; pipe.sh itself acquires
+    # PLAYLOCK only around actual playback, so a queued reply's synth overlaps
+    # the previous reply's playback instead of waiting idle for it (see NOTES.md
+    # §2). Free lock -> no wait, so a reply with nothing ahead of it plays
+    # immediately as before.
     os.makedirs(os.path.dirname(PLAYLOCK), exist_ok=True)
     subprocess.Popen(
-        ["flock", "-x", PLAYLOCK, "bash", QSAY, text, VOICE],
+        ["bash", QSAY, text, VOICE],
         stdin=subprocess.DEVNULL,
         stdout=log,
         stderr=log,

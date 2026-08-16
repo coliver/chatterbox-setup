@@ -36,6 +36,11 @@ warnings.filterwarnings("ignore")
 
 HOST, PORT = os.environ.get("CBX_HOST", "0.0.0.0"), 8766  # 0.0.0.0 = reachable on LAN
 
+# Optional shared-secret auth. Unset (default) = no auth, behavior unchanged.
+# Set on both server and client (pipe.sh sends it as a header/query param) to
+# require it -- see README. Checked against X-Auth-Token header or ?token=.
+CBX_TOKEN = os.environ.get("CBX_TOKEN", "")
+
 # Chatterbox output is very quiet (raw peak ~0.11). Peak-normalize each clip up
 # to near full scale so the voice is actually loud. Cap the gain so a near-silent
 # clip can't blow up into amplified noise.
@@ -136,14 +141,34 @@ except Exception as e:  # pragma: no cover
     print(f"[cbx] warmup failed: {e}", flush=True)
 
 
+def _safe_out(requested):
+    """Confine a client-supplied `out` path to a filename inside SCRATCH.
+    Strips any directory component (so ../../ or an absolute path can't
+    escape it) and rejects empty/`.`/`..` after that stripping. Caps the
+    write primitive to "some filename inside scratch/", auth or not."""
+    name = os.path.basename(requested or "")
+    if not name or name in (".", ".."):
+        name = os.path.basename(DEFAULT_OUT)
+    return os.path.join(SCRATCH, name)
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
 
+    def _authorized(self, q):
+        if not CBX_TOKEN:
+            return True
+        got = self.headers.get("X-Auth-Token") or q.get("token", [""])[0]
+        return got == CBX_TOKEN
+
     def do_GET(self):
         path = urlparse(self.path).path
+        q = parse_qs(urlparse(self.path).query)
         if path == "/health":
             self._send(200, "ok")
+        elif not self._authorized(q):
+            self._send(401, "unauthorized")
         elif path == "/voices":
             self._send(200, "\n".join(sorted(voicelib.voices())))
         elif path == "/chimes":
@@ -156,6 +181,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(404, "not found")
             return
         q = parse_qs(urlparse(self.path).query)
+        if not self._authorized(q):
+            self._send(401, "unauthorized")
+            return
         voice = q.get("voice", [DEFAULT_VOICE])[0]
         voices = voicelib.voices()
         if voice not in voices:
@@ -169,7 +197,7 @@ class Handler(BaseHTTPRequestHandler):
         except ValueError as e:
             self._send(400, str(e))
             return
-        out = q.get("out", [DEFAULT_OUT])[0]
+        out = _safe_out(q.get("out", [DEFAULT_OUT])[0])
         stream = q.get("stream", ["0"])[0] not in ("0", "", "false", "no")
         n = int(self.headers.get("Content-Length", 0))
         text = self.rfile.read(n).decode("utf-8").strip()

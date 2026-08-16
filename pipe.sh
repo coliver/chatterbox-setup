@@ -49,7 +49,9 @@ eq="&temperature=${TEMP:-0.8}"
 
 gen() { local i="$1"
   local raw="$scr/${prefix}_${i}.raw.wav" final="$scr/${prefix}_${i}.wav"
-  run curl -s -m 300 -X POST "${CBX_SAY_URL}?out=${raw}${vq}${eq}" --data-binary "${lines[$i]}" >/dev/null
+  local -a authhdr=()
+  [ -n "${CBX_TOKEN:-}" ] && authhdr=(-H "X-Auth-Token: ${CBX_TOKEN}")
+  run curl -s -m 300 -X POST "${authhdr[@]}" "${CBX_SAY_URL}?out=${raw}${vq}${eq}" --data-binary "${lines[$i]}" >/dev/null
   # In dry-run nothing was written, so skip the publish below.
   [ "${DRY_RUN:-0}" = "1" ] && return 0
   # Optional tempo change (atempo preserves pitch), then publish atomically via mv
@@ -84,6 +86,16 @@ if [ "${DRY_RUN:-0}" = "1" ]; then
   echo "dry run ($n clips)"
   exit 0
 fi
+
+# Only playback is serialized across concurrent qsay.sh invocations (e.g. two
+# queued Stop-hook replies): acquire PLAYLOCK here, right before driving the
+# player, so a reply that's still synthesizing above doesn't block a prior
+# reply's audio, and a reply that finishes synthesizing first doesn't jump the
+# queue -- it waits here for the previous reply's playback to finish, then
+# plays. Held fd releases naturally on exit via the existing `trap cleanup
+# EXIT` below. (NOTES.md §2: replies queue, they don't interrupt.)
+exec 9>"$scr/talk.play.lock"
+flock -x 9
 
 # ONE long-lived PowerShell player instead of a fresh spawn per clip. Spawning
 # powershell+SoundPlayer costs ~0.5s of cold-start, which — paid at every clip

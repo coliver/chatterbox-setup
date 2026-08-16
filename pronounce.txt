@@ -3,4 +3,6 @@
 # Chatterbox has no phoneme input, so the only lever is respelling the text.
 wav wave
 gh Github C L I
-aws A W S
+aws Ay W S
+AWS Ay W S
+picard PEE-kard
