@@ -1,4 +1,8 @@
-# Warm TTS
+# Quackerbox 🦆
+
+*("Quick Chatterbox" → Quackerbox. All credit for the actual TTS engine goes
+to [resemble-ai/chatterbox](https://github.com/resemble-ai/chatterbox) — this
+repo is just the always-warm server + low-latency client wrapped around it.)*
 
 Always-warm local text-to-speech with a low-latency bash client. The
 **Chatterbox turbo** server (`chatterbox_server.py`, port `8766`) loads its model

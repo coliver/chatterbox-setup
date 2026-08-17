@@ -27,7 +27,8 @@ import time
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECT = os.path.dirname(HERE)
 QSAY = os.path.join(PROJECT, "qsay.sh")
-VOICE = os.environ.get("SHIP_HOOK_VOICE", "data-wellington")  # talkback voice (SPEED 1.2)
+VOICES_DIR = os.path.join(PROJECT, "voices")
+DEFAULT_VOICE = os.environ.get("SHIP_HOOK_VOICE", "jarvis-03")  # talkback voice (SPEED 1.2)
 LASTFILE = os.path.join(HERE, ".speak.last")  # hash of the message last spoken
 # Serialize spoken replies: each utterance runs under an exclusive flock on this
 # file, so a new reply WAITS for the one still speaking to finish instead of
@@ -96,6 +97,25 @@ def chime_from(raw):
     the assistant picks the chime per reply to match its tone."""
     m = CHIME_RE.search(raw)
     return m.group(1) if m else ""
+
+
+VOICE_RE = re.compile(r"<!--\s*VOICE:\s*([A-Za-z0-9_-]+)\s*-->")
+
+
+def voice_from(raw):
+    """Voice name from a `<!--VOICE: name-->` marker, validated against the
+    voice files actually present in voices/ (name.<ext> for any extension) so
+    a marker can only ever select a real, existing voice -- never a path or
+    arbitrary string. No match (missing marker or unknown name) -> ''."""
+    m = VOICE_RE.search(raw)
+    if not m:
+        return ""
+    name = m.group(1)
+    try:
+        stems = {os.path.splitext(f)[0] for f in os.listdir(VOICES_DIR)}
+    except OSError:
+        return ""
+    return name if name in stems else ""
 
 
 def despeakify(text):
@@ -171,7 +191,9 @@ def main():
     # Default to a short chirp so the voice never starts cold (startling); a
     # <!--CHIME: name--> marker or SHIP_HOOK_CHIME overrides. CHIME="" via marker
     # "none" still disables (pipe.sh treats a missing wav as no chime).
-    chime = chime_from(last_assistant_text(tpath)) or os.environ.get("SHIP_HOOK_CHIME", "ship-combadge")
+    last_raw = last_assistant_text(tpath)
+    chime = chime_from(last_raw) or os.environ.get("SHIP_HOOK_CHIME", "ship-combadge")
+    voice = voice_from(last_raw) or DEFAULT_VOICE
 
     # Distinct scratch prefix so background hook speech never stomps a manual
     # ./qsay.sh (which defaults to the "qsay" prefix).
@@ -199,7 +221,7 @@ def main():
     if chime:
         env["CHIME"] = chime
     log = open(os.path.join(HERE, "speak.log"), "w")  # noqa: SIM115 (lives with child)
-    log.write(f"==== {time.strftime('%H:%M:%S')} launching: {text[:60]!r} chime={chime or '-'}\n")
+    log.write(f"==== {time.strftime('%H:%M:%S')} launching: {text[:60]!r} voice={voice} chime={chime or '-'}\n")
     log.flush()
     # Launch detached (own session) so this hook returns at once and never blocks
     # the turn. Synthesis starts immediately, unlocked; pipe.sh itself acquires
@@ -209,7 +231,7 @@ def main():
     # immediately as before.
     os.makedirs(os.path.dirname(PLAYLOCK), exist_ok=True)
     subprocess.Popen(
-        ["bash", QSAY, text, VOICE],
+        ["bash", QSAY, text, voice],
         stdin=subprocess.DEVNULL,
         stdout=log,
         stderr=log,

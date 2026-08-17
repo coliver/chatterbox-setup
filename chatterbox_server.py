@@ -249,5 +249,5 @@ class Handler(BaseHTTPRequestHandler):
 
 if __name__ == "__main__":
     srv = ThreadingHTTPServer((HOST, PORT), Handler)
-    print(f"[cbx] ready on http://{HOST}:{PORT}", flush=True)
+    print(f"🦆 [cbx] ready on http://{HOST}:{PORT}", flush=True)
     srv.serve_forever()

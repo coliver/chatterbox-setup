@@ -6,6 +6,14 @@ or cluster of commits, in plain language.
 
 ## Unreleased
 
+- **Per-reply voice override**: the Stop-hook helper (`.claude/speak-last-message.py`)
+  now honors an optional `<!--VOICE: name-->` marker in a reply, letting a single
+  reply speak in a different voice than the persona default. The name is
+  validated against files actually present in `voices/` before use (matched by
+  stem, any extension); an unrecognized name is ignored and the default voice
+  plays instead, so the marker can only ever select a real, existing voice —
+  never a path or arbitrary value. Mirrors the existing `<!--CHIME: name-->`
+  marker.
 - **Security/hardening**: opt-in `CBX_TOKEN` shared-secret auth on the
   server (all endpoints except `/health`); `out=` is now confined to a
   basename under `scratch/` instead of accepting an arbitrary path (was an
