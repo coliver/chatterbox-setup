@@ -38,7 +38,9 @@ log "starting Chatterbox... (pid $newpid)"
 # Wait for the model to load and health to go green.
 for ((i = 1; i <= timeout; i++)); do
   if [ "$(curl -s -m 2 "http://127.0.0.1:${port}/health" || true)" = "ok" ]; then
-    log "ready after ${i}s"; exit 0
+    log "ready after ${i}s"
+    [ -t 1 ] && "$dir/mascot.sh"
+    exit 0
   fi
   if ! kill -0 "$newpid" 2>/dev/null; then
     die "server process $newpid died while waiting for health - check $dir/logs/$stem.err.log"
